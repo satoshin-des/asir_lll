@@ -1,0 +1,242 @@
+/*内積*/
+def dot(X, Y){
+	N = size(X);
+	S = 0;
+	for(I = 0; I < N[0]; I += 1){S += X[I] * Y[I];}
+	return S;
+}
+
+/*最大値*/
+def max(A, B){
+	if(A > B){return A;}
+	else{return B;}
+}
+
+/*グラムシュミットの直交化法*/
+def gram_schmidt(B){
+	M = size(B); N = M[0]; M = M[1];
+	MU = newmat(N, N);
+	GSOB = newmat(N, M);
+	for(I = 0; I < N; I += 1){
+		MU[I][I] = 1.0;
+		for(J = 0; J < M; J += 1){
+			GSOB[I][J] = B[I][J];
+		}
+		for(J = 0; J < I; J += 1){
+			MU[I][J] = dot(B[I], GSOB[J]) / dot(GSOB[J], GSOB[J]);
+			for(K = 0; K < M; K += 1){GSOB[I][K] -= MU[I][J] * GSOB[J][K];}
+		}
+	}
+	return [GSOB, MU];
+}
+
+def gram_schmidt_squared(B){
+	M = size(B); N = M[0]; M = M[1];
+	BB = newvect(N);
+	MU = newmat(N, N);
+	GSOB = newmat(N, M);
+	for(I = 0; I < N; I += 1){
+		MU[I][I] = 1.0;
+		for(J = 0; J < M; J += 1){GSOB[I][J] = B[I][J];}
+		for(J = 0; J < I; J += 1){
+			MU[I][J] = dot(B[I], GSOB[J]) / dot(GSOB[J], GSOB[J]);
+			for(K = 0; K < M; K += 1){GSOB[I][K] -= MU[I][J] * GSOB[J][K];}
+		}
+		BB[I] = dot(GSOB[I], GSOB[I]);
+	}
+	return [BB, MU];
+}
+
+/*部分サイズ基底簡約*/
+def size_reduce(B, MU, I, J){
+	M = size(B); N = M[0]; M = M[1];
+	if(MU[I][J] > 0.5 || MU[I][J] < -0.5){
+		Q = rint(MU[I][J]);
+		for(K = 0; K < M; K += 1){B[I][K] -= Q * B[J][K];}
+		for(K = 0; K <= J; K += 1){MU[I][K] -= MU[J][K] * Q;}
+	}
+	return [B, MU];
+}
+
+/*LLL基底簡約*/
+def lll(B, D){
+	M = size(B); N = M[0]; M = M[1];
+	MU = gram_schmidt_squared(B); BB = MU[0]; MU = MU[1];
+	for(K = 1; K < N;){
+		for(J = K - 1; J > -1; J -= 1){
+			MU = size_reduce(B, MU, K, J);
+			B = MU[0]; MU = MU[1];
+		}
+
+		if(BB[K] >= (D - MU[K][K - 1] * MU[K][K - 1]) * BB[K - 1]){K += 1;}
+		else{
+			for(I = 0; I < M; I += 1){
+				TMP = B[K - 1][I]; B[K - 1][I] = B[K][I]; B[K][I] = TMP;
+			}
+			NU = MU[K][K - 1]; C = BB[K] + NU * NU * BB[K - 1]; C_INV = 1 / C; 
+			MU[K][K - 1] = NU * BB[K - 1] * C_INV;
+			BB[K] *= BB[K - 1] * C_INV; BB[K - 1] = C;
+			for(J = 0; J < K - 1; J += 1){
+				T = MU[K - 1][J]; MU[K - 1][J] = MU[K][J]; MU[K][J] = T;
+			}
+			for(I = K + 1; I < N; I += 1){
+				T = MU[I][K]; MU[I][K] = MU[I][K - 1] - NU * T;
+				MU[I][K - 1] = T + MU[K][K - 1] * MU[I][K];
+			}
+
+			K = max(K - 1, 1);
+		}
+	}
+	return B;
+}
+
+/*DeepLLL簡約*/
+def deeplll(B, D){
+	M = size(B); N = M[0]; M = M[1];
+	MU = gram_schmidt_squared(B); BB = MU[0]; MU = MU[1];
+	V = newvect(M);
+
+	for(K = 1; K < N;){
+		for(J = K - 1; J >= 0; J -= 1){size_reduce(B, MU, K, J);}
+
+		C = dot(B[K], B[K]);
+		for(I = 0; I < K;){
+			if(C >= D * BB[I]){
+				C -= MU[K][I] * MU[K][I] * BB[I];
+				I += 1;
+			}else{
+				for(J = 0; J < M; J += 1){V[J] = B[K][J];}
+				for(J = K; J > I; J -= 1){
+					for(L = 0; L < M; L += 1){B[J][L] = B[J - 1][L];}
+				}
+				for(J = 0; J < M; J += 1){B[I][J] = V[J];}
+				MU = gram_schmidt_squared(B); BB = MU[0]; MU = MU[1];
+				K = max(I - 1, 0);
+			}
+		}
+		K += 1;
+	}
+	return B;
+}
+
+/*二乗ノルムがRR以下である最大の格子ベクトルを出力する*/
+def enum(MU, BB, RR){
+	N = size(BB); N = N[0]; N1 = N + 1;
+	LAST_NONZERO = 0;
+	R = newvect(N1); V = newvect(N); W = newvect(N); C = newvect(N); RHO = newvect(N1);
+	SIGMA = newmat(N1, N);
+
+	/*零ベクトルを避ける*/
+	V[0] = 1;
+
+	for(I = 0; I < N; I += 1){R[I] = I;}
+	for(K = 0; K <= N;){
+		TMP = V[K] - C[K];
+		RHO[K] = RHO[K + 1] + TMP * TMP * BB[K];
+		if(RHO[K] <= RR){
+			if(K == 0){return V;}
+			K -= 1;
+			R[K] = max(R[K], R[K + 1]);
+			for(I = R[K]; I > K; I -= 1){SIGMA[I][K] = SIGMA[I + 1][K] + MU[I][K] * V[I];}
+			C[K] = -SIGMA[K + 1][K];
+			V[K] = rint(C[K]);
+			W[K] = 1;
+		}else{
+			K += 1;
+			if(K == N){break;}
+			R[K] = K;
+			if(K >= LAST_NONZERO){
+				LAST_NONZERO = K;
+				V[K] += 1;
+			}else{
+				if(V[K] > C[K]){V[K] -= W[K];}else{V[K] += W[K];}
+				W[K] += 1;
+			}
+		}
+	}
+	return 0;
+}
+
+/*最短ベクトルの数え上げ*/
+def enumerate_svp(MU, BB, RR, B){
+	N = size(BB); N = N[0];
+	ENUM_V = newvect(N);
+	for(;;){
+		PRE_ENUM_V = ENUM_V;
+		ENUM_V = enum(MU, BB, RR);
+		if(ENUM_V == 0){return PRE_ENUM_V * B;}
+		RR = dot(ENUM_V * B, ENUM_V * B) - 1;
+	}
+}
+
+/*Babaiの最近平面アルゴリズム*/
+def babai(B, W){
+	M = size(B); N = M[0]; M = M[1];
+	T = newvect(N);
+	for(I = 0; I < N; I += 1){T[I] = W[I];}
+	MU = gram_schmidt(B); GSOB = MU[0]; MU = MU[1];
+	for(I = N - 1; I >= 0; I -= 1){
+		C = rint(dot(T, GSOB[I]) / dot(GSOB[I], GSOB[I]));
+		for(J = 0; J < M; J += 1){T[J] -= C * GSOB[I][J];}
+	}
+	return W - T;
+}
+
+/*Babaiの最近平面アルゴリズムによって得られた近似解と目標ベクトルとの差の二乗ノルム*/
+def babai_error(B, W){
+	T = babai(B, W);
+	ERROR_VEC = T - W;
+	return dot(ERROR_VEC, ERROR_VEC);
+}
+
+def enum_c(MU, BB, RR, A){
+	N = size(BB); N = N[0]; N1 = N + 1;
+	R = newvect(N1); V = newvect(N); W = newvect(N); C = newvect(N); RHO = newvect(N1);
+	SIGMA = newmat(N1, N);
+
+	V[0] = 1;
+	for(I = 0; I < N; I += 1){R[I] = I;}
+	for(K = N - 1; K >= 0; K -= 1){
+		for(I = N - 1; I > K; I -= 1){SIGMA[I][K] = SIGMA[I + 1][K] + (A[I] - V[I]) * MU[I][K];}
+		C[K] = A[K] + SIGMA[K + 1][K];
+		V[K] = rint(C[K]);
+		W[K] = 1;
+		TMP = C[K] - V[K];
+		RHO[K] = RHO[K + 1] + TMP * TMP * BB[K];
+	}
+
+	for(K = 0; K <= N;){
+		TMP = C[K] - V[K];
+		RHO[K] = RHO[K + 1] + TMP * TMP * BB[K];
+		if(RHO[K] <= RR){
+			if(K == 0){return V;}
+			K -= 1;
+			R[K] = max(R[K], R[K + 1]);
+			for(I = R[K]; I > K; I -= 1){SIGMA[I][K] = SIGMA[I + 1][K] + (A[I] - V[I]) * MU[I][K];}
+			C[K] = A[K] + SIGMA[K + 1][K];
+			V[K] = rint(C[K]);
+			W[K] = 1;
+		}else{
+			K += 1;
+			if(K == N){break;}
+			R[K - 1] = K;
+			if(V[K] > C[K]){V[K] -= W[K];}else{V[K] += W[K];}
+			W[K] += 1;
+		}
+	}
+	return 0;
+}
+
+def enumerate_cvp(MU, BB, RR, A, B){
+	N = size(BB); N = N[0];
+	CVP_LIST = [];
+	ENUM_V = newvect(N);
+	for(;;){
+		PRE_ENUM_V = ENUM_V;
+		ENUM_V = enum_c(MU, BB, RR, A);
+		if(ENUM_V == 0) return PRE_ENUM_V * B;
+		RR = dot((ENUM_V - A) * B, (ENUM_V - A) * B) - 1;
+	}
+}
+
+end$
